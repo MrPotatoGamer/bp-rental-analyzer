@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.tox/
+.nox/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Env files / secrets
+.env
+.env.*
+*.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# IDEs
+.idea/
+
+# Project outputs (generated)
+data/*
+!data/.gitkeep
+images/*
+!images/.gitkeep
+report_*.pdf
