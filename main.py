@@ -21,11 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 def make_search_key(url: str) -> str:
-    """Create a filesystem-safe key for a search URL.
-
-    Used to keep snapshots/trends separated per query so results don't mix.
-    """
-
     parsed = urlparse(url)
     base = (parsed.path or "search").strip("/")
     base = base.replace("+", "_").replace("/", "_")
@@ -87,7 +82,6 @@ def configure_logging(level: str) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    # Keep 3rd party libs quiet unless debugging them.
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("PIL").setLevel(logging.WARNING)
 
@@ -101,7 +95,6 @@ def main() -> int:
     images_dir.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Keep each search's history separate, otherwise trends become misleading.
     search_key = make_search_key(args.url)
     run_data_dir = data_dir / search_key
     run_data_dir.mkdir(parents=True, exist_ok=True)
@@ -116,7 +109,6 @@ def main() -> int:
 
     save_snapshot(df, data_dir=str(run_data_dir))
 
-    # Charts
     district_chart = plot_district_ranking(
         df,
         out_path=str(images_dir / "district_ranking.png"),
@@ -129,7 +121,6 @@ def main() -> int:
         out_path=str(images_dir / "weekly_trend.png"),
     )
 
-    # Deal Finder
     deals_df, segment_avg = find_deals(
         df,
         district=args.district,
@@ -141,7 +132,6 @@ def main() -> int:
     summary = basic_summary(df)
     summary["segment_avg_price_per_sqm_huf"] = segment_avg
 
-    # Cheapest / most expensive district (current snapshot)
     district_metric = df[["district", "price_per_sqm_huf"]].copy()
     district_metric["district"] = pd.to_numeric(district_metric["district"], errors="coerce")
     district_metric["price_per_sqm_huf"] = pd.to_numeric(district_metric["price_per_sqm_huf"], errors="coerce")
@@ -156,8 +146,6 @@ def main() -> int:
         summary["most_expensive_district"] = int(expensive_d)
         summary["most_expensive_district_avg_pps"] = float(by_district.loc[expensive_d])
 
-    # Default: generate a new PDF on every run (timestamped).
-    # If you want overwriting behavior, pass an explicit --pdf-path.
     pdf_path = args.pdf_path or f"report_{dt.datetime.now():%Y-%m-%d_%H%M%S}.pdf"
     generate_pdf_report(
         output_path=pdf_path,
@@ -173,7 +161,6 @@ def main() -> int:
         threshold_pct=args.deal_threshold,
     )
 
-    # Quick console recap (via logging)
     logger.info("Kész: %s hirdetés", summary.get("listing_count"))
     logger.info("Átlag fajlagos ár: %s Ft/hó/m²", summary.get("avg_price_per_sqm_huf"))
     if summary.get("cheapest_district") is not None:

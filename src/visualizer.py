@@ -20,8 +20,6 @@ def plot_district_ranking(
     out_path: str,
     metric_col: str = "price_per_sqm_huf",
 ) -> Path | None:
-    """Bar chart: average metric by district (cheapest -> most expensive)."""
-
     if df.empty or metric_col not in df.columns or "district" not in df.columns:
         logger.warning("No data to plot district ranking")
         return None
@@ -61,8 +59,6 @@ def plot_weekly_trend(
     out_path: str,
     metric_col: str = "avg_price_per_sqm_huf",
 ) -> Path | None:
-    """Line chart: weekly trend of average price per sqm."""
-
     if trend_df.empty or metric_col not in trend_df.columns or "date" not in trend_df.columns:
         logger.warning("No data to plot weekly trend")
         return None

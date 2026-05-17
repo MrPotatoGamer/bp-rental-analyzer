@@ -16,12 +16,9 @@ _DISTRICT_RE = re.compile(r"Budapest\s+(?P<roman>[IVXLCDM]+)\.?\s*kerület", re.
 
 
 def clean_price_huf(price_text: str | None) -> int | None:
-    """Parse HUF price from strings like '350 000 Ft/hó'."""
-
     if not price_text:
         return None
 
-    # Only handle HUF for now.
     if "Ft" not in price_text:
         return None
 
@@ -29,13 +26,6 @@ def clean_price_huf(price_text: str | None) -> int | None:
     if not groups:
         return None
 
-    # ingatlan.com card text often contains a leading small number (e.g. image count)
-    # right before the actual price: "9 290 000 Ft/hó" -> 290000
-    # We generate candidates from the last N groups and choose a plausible one.
-    #
-    # Important: avoid candidates that would start with a leading-zero thousands block
-    # (e.g. "070 070"), because that usually means we accidentally dropped the real
-    # million/hundred-thousand part (e.g. "1 070 070").
     candidates: list[tuple[int, list[str]]] = []
     for k in range(2, min(5, len(groups) + 1)):
         try:
@@ -61,8 +51,6 @@ def clean_price_huf(price_text: str | None) -> int | None:
 
 
 def clean_area_m2(area_text: str | None) -> float | None:
-    """Parse area in m² from strings like '46 m2'."""
-
     if not area_text:
         return None
 
@@ -100,8 +88,6 @@ def roman_to_int(roman: str) -> int | None:
 
 
 def parse_district(location_text: str | None) -> int | None:
-    """Extract district number from 'Budapest XIII. kerület, ...'."""
-
     if not location_text:
         return None
 
@@ -146,8 +132,6 @@ def to_dataframe(listings: Sequence[RawListing]) -> pd.DataFrame:
 
 def save_snapshot(df: pd.DataFrame, *, data_dir: str = "data", date: dt.date | None = None) -> Path:
     Path(data_dir).mkdir(parents=True, exist_ok=True)
-    # Keep snapshots per-run (timestamped) so trends can show changes over time.
-    # Backward compatible: if `date` is provided, it still influences the day-part.
     now = dt.datetime.now()
     snapshot_date = date or now.date()
     snapshot_ts = dt.datetime.combine(snapshot_date, now.time()).replace(microsecond=0)
@@ -170,7 +154,6 @@ def load_snapshots(*, data_dir: str = "data", days: int = 7) -> list[pd.DataFram
         snapshot_ts: dt.datetime | None = None
         d: dt.date | None = None
 
-        # New format: listings_YYYY-MM-DD_HHMMSS.csv
         m_ts = re.match(r"listings_(\d{4}-\d{2}-\d{2})_(\d{6})\.csv$", file.name)
         if m_ts:
             try:
@@ -179,7 +162,6 @@ def load_snapshots(*, data_dir: str = "data", days: int = 7) -> list[pd.DataFram
             except ValueError:
                 continue
         else:
-            # Old format: listings_YYYY-MM-DD.csv
             m_date = re.match(r"listings_(\d{4}-\d{2}-\d{2})\.csv$", file.name)
             if not m_date:
                 continue
@@ -201,14 +183,11 @@ def load_snapshots(*, data_dir: str = "data", days: int = 7) -> list[pd.DataFram
 
 
 def compute_weekly_trend(snapshots: Sequence[pd.DataFrame]) -> pd.DataFrame:
-    """Return a daily time series of avg price_per_sqm_huf for the last N snapshots."""
-
     rows: list[dict[str, object]] = []
     for df in snapshots:
         if df.empty or "snapshot_date" not in df.columns:
             continue
 
-        # Prefer timestamped snapshots for higher fidelity; fall back to date.
         date_str = str(df["snapshot_ts"].iloc[0]) if "snapshot_ts" in df.columns else str(df["snapshot_date"].iloc[0])
         series = df.get("price_per_sqm_huf")
         values = pd.to_numeric(series, errors="coerce").dropna() if series is not None else pd.Series(dtype=float)
@@ -237,11 +216,6 @@ def find_deals(
     max_area: float | None = None,
     threshold_pct: float = 0.15,
 ) -> tuple[pd.DataFrame, float | None]:
-    """Find listings that are `threshold_pct` below the segment average (price per m²).
-
-    Returns: (deals_df, segment_avg_price_per_sqm)
-    """
-
     if df.empty:
         return df.copy(), None
 

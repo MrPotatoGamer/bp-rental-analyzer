@@ -15,13 +15,6 @@ logging.getLogger("fontTools.subset").setLevel(logging.ERROR)
 
 
 def _pdf_safe(value: object) -> str:
-    """Make text safe for the legacy `fpdf` (latin-1) encoder.
-
-    - Replace fancy dashes
-    - Strip accents (ő/ű/etc.)
-    - Keep plain ASCII to avoid UnicodeEncodeError
-    """
-
     if value is None:
         return ""
 
@@ -33,14 +26,6 @@ def _pdf_safe(value: object) -> str:
 
 
 def _pick_windows_ttf_fonts() -> dict[str, str]:
-    """Pick TTF font paths for regular/bold that support Hungarian accents.
-
-    Returns a mapping of style -> path, where style is "" or "B".
-    Priority:
-    1) RENTAL_ANALYZER_TTF (regular) + RENTAL_ANALYZER_TTF_BOLD (bold)
-    2) Common Windows font pairs
-    """
-
     fonts: dict[str, str] = {}
 
     env_regular = os.environ.get("RENTAL_ANALYZER_TTF")
@@ -52,7 +37,6 @@ def _pick_windows_ttf_fonts() -> dict[str, str]:
     if fonts.get(""):
         return fonts
 
-    # Windows defaults (regular, bold)
     pairs = [
         ("C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/segoeuib.ttf"),
         ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
@@ -87,12 +71,6 @@ def _fmt_float_hu(value: float | int | None, *, digits: int = 1) -> str:
 
 
 def _wrap_long_text(text: str, *, max_len: int = 80) -> list[str]:
-    """Wrap long text into multiple lines.
-
-    fpdf2 may raise if a single 'word' is wider than the cell.
-    URLs can trigger this, so we wrap them defensively.
-    """
-
     if len(text) <= max_len:
         return [text]
 
@@ -116,24 +94,16 @@ class RentalReportPDF(FPDF):
         self._try_enable_unicode()
 
     def _try_enable_unicode(self) -> None:
-        """Attempt to enable Unicode output by registering a TTF font.
-
-        Works with `fpdf2`. If not available, we keep the legacy latin-1 safe mode.
-        """
-
         fonts = _pick_windows_ttf_fonts()
         if not fonts.get(""):
             return
-
         try:
-            # fpdf2 supports uni=True
             self.add_font("Unicode", "", fonts[""], uni=True)
             if fonts.get("B"):
                 self.add_font("Unicode", "B", fonts["B"], uni=True)
             self._font_family = "Unicode"
             self._unicode_enabled = True
         except TypeError:
-            # Older implementations may not accept uni=...
             try:
                 self.add_font("Unicode", "", fonts[""])
                 if fonts.get("B"):
@@ -146,11 +116,6 @@ class RentalReportPDF(FPDF):
             return
 
     def set_report_font(self, style: str, size: int) -> None:
-        """Set font with a safe fallback for Unicode fonts.
-
-        Some environments may not have a bold TTF available; in that case we fall back to regular.
-        """
-
         use_style = style
         if self._unicode_enabled and style == "B":
             try:
@@ -161,12 +126,10 @@ class RentalReportPDF(FPDF):
         super().set_font(self._font_family, use_style, size)
 
     def txt(self, value: object) -> str:
-        """Text helper: keep accents if unicode is enabled, otherwise sanitize."""
-
         text = "" if value is None else str(value)
         return text if self._unicode_enabled else _pdf_safe(text)
 
-    def header(self) -> None:  # type: ignore[override]
+    def header(self) -> None:
         self.set_y(8)
         left_x = 10
 
@@ -182,7 +145,7 @@ class RentalReportPDF(FPDF):
         self.cell(0, 10, self.txt(self._title), ln=1)
         self.ln(2)
 
-    def footer(self) -> None:  # type: ignore[override]
+    def footer(self) -> None:
         self.set_y(-15)
         self.set_report_font("", 9)
         self.cell(0, 10, f"{self.page_no()}", align="C")
@@ -259,8 +222,6 @@ def generate_pdf_report(
         pdf.ln(3)
         pdf.set_report_font("B", 12)
         pdf.cell(0, 7, pdf.txt(caption), ln=1)
-
-        # Fit to page width (A4 210mm, margins ~10mm)
         try:
             pdf.image(str(p), w=190)
         except Exception as exc:

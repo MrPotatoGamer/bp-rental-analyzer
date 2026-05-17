@@ -36,11 +36,6 @@ _ROOMS_RE = re.compile(r"Szob[áa]k?\s+(?P<rooms>[0-9\s\+\-fél]+)", re.IGNORECA
 
 @dataclass(frozen=True, slots=True)
 class RawListing:
-    """Raw listing as extracted from the search result page.
-
-    `processor.py` is responsible for turning these text fields into clean numeric columns.
-    """
-
     listing_id: str
     url: str
     title: str | None
@@ -77,7 +72,7 @@ class IngatlanScraper:
                 if response.status_code != 200:
                     raise RuntimeError(f"HTTP {response.status_code} for {url}")
                 return response.text
-            except Exception as exc:  # cloudscraper ultimately wraps requests
+            except Exception as exc:
                 last_error = exc
                 logger.warning("Request failed: %s", exc)
                 if attempt < self._max_retries:
@@ -97,8 +92,6 @@ class IngatlanScraper:
         delay_s: float = 1.0,
         max_listings: int | None = None,
     ) -> list[RawListing]:
-        """Fetch and parse multiple pages from an ingatlan.com search URL."""
-
         all_listings: dict[str, RawListing] = {}
         current_url = url
 
@@ -123,19 +116,11 @@ class IngatlanScraper:
 
 
 def parse_listings(soup: BeautifulSoup, *, source_url: str) -> list[RawListing]:
-    """Extract listing cards from a search page soup.
-
-    Strategy:
-    1) Prefer anchors that look like listing links: https://ingatlan.com/<id>
-    2) Best-effort extraction of price/location/area/rooms from anchor text
-    """
-
     scraped_at = dt.datetime.now(dt.timezone.utc)
     base_url = "https://ingatlan.com"
 
     listings: dict[str, RawListing] = {}
 
-    # 1) JSON-LD sometimes contains URLs (nice fallback when HTML changes)
     for url_ in _extract_urls_from_json_ld(soup):
         listing_id = _extract_listing_id(url_)
         if not listing_id:
@@ -157,7 +142,6 @@ def parse_listings(soup: BeautifulSoup, *, source_url: str) -> list[RawListing]:
             ),
         )
 
-    # 2) Anchors with /<id>
     for a in soup.find_all("a", href=True):
         href = str(a.get("href", "")).strip()
         listing_id = _extract_listing_id(href)
@@ -165,7 +149,6 @@ def parse_listings(soup: BeautifulSoup, *, source_url: str) -> list[RawListing]:
             continue
 
         text = a.get_text(" ", strip=True)
-        # Heuristic: ignore numeric links that clearly aren't listing cards
         if text and ("Ft" not in text) and ("Alapterület" not in text):
             continue
 
@@ -235,7 +218,6 @@ def _extract_fields_from_text(text: str) -> tuple[str | None, str | None, str | 
             loc = re.sub(r"\s+", " ", loc).strip()
             location_text = loc or None
 
-    # Title is best-effort: location if present, otherwise the whole text
     title = location_text or (normalized[:80] if normalized else None)
 
     return title, location_text, price_text, area_text, rooms_text
@@ -272,7 +254,6 @@ def _walk_for_urls(node: Any) -> list[str]:
 def _safe_json_load(text: str) -> Any:
     import json
 
-    # Some pages embed multiple JSON objects without strict formatting.
     text = text.strip()
     return json.loads(text)
 
