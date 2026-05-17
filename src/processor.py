@@ -182,21 +182,36 @@ def load_snapshots(*, data_dir: str = "data", days: int = 7) -> list[pd.DataFram
     return snapshots
 
 
-def compute_weekly_trend(snapshots: Sequence[pd.DataFrame]) -> pd.DataFrame:
+def compute_weekly_trend(
+    snapshots: Sequence[pd.DataFrame],
+    *,
+    min_area: float | None = None,
+    max_area: float | None = None,
+) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for df in snapshots:
         if df.empty or "snapshot_date" not in df.columns:
             continue
 
         date_str = str(df["snapshot_ts"].iloc[0]) if "snapshot_ts" in df.columns else str(df["snapshot_date"].iloc[0])
-        series = df.get("price_per_sqm_huf")
+        segment = df
+        if min_area is not None or max_area is not None:
+            area = pd.to_numeric(segment.get("area_m2"), errors="coerce")
+            mask = area.notna()
+            if min_area is not None:
+                mask &= area >= float(min_area)
+            if max_area is not None:
+                mask &= area <= float(max_area)
+            segment = segment.loc[mask]
+
+        series = segment.get("price_per_sqm_huf")
         values = pd.to_numeric(series, errors="coerce").dropna() if series is not None else pd.Series(dtype=float)
 
         rows.append(
             {
                 "date": date_str,
                 "avg_price_per_sqm_huf": float(values.mean()) if not values.empty else None,
-                "listing_count": int(len(df)),
+                "listing_count": int(len(segment)),
             }
         )
 
@@ -229,6 +244,26 @@ def find_deals(
 
     if max_area is not None:
         segment = segment[pd.to_numeric(segment["area_m2"], errors="coerce") <= max_area]
+
+    if district is None and "district" in segment.columns:
+        work = segment.copy()
+        work["district"] = pd.to_numeric(work["district"], errors="coerce")
+        work["price_per_sqm_huf"] = pd.to_numeric(work["price_per_sqm_huf"], errors="coerce")
+        work = work.dropna(subset=["district", "price_per_sqm_huf"])
+
+        if not work.empty:
+            avg_by_district = work.groupby("district")["price_per_sqm_huf"].mean()
+            work["_baseline"] = work["district"].map(avg_by_district)
+            work["_threshold"] = work["_baseline"] * (1.0 - float(threshold_pct))
+
+            deals = work[work["price_per_sqm_huf"] <= work["_threshold"]].copy()
+            if deals.empty:
+                return deals, None
+
+            deals["deal_delta_pct"] = (deals["price_per_sqm_huf"] / deals["_baseline"]) - 1.0
+            deals = deals.drop(columns=["_baseline", "_threshold"], errors="ignore")
+            deals = deals.sort_values("deal_delta_pct", ascending=True)
+            return deals, None
 
     metric = pd.to_numeric(segment.get("price_per_sqm_huf"), errors="coerce").dropna()
     if metric.empty:

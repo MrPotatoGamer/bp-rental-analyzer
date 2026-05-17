@@ -42,8 +42,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pages", type=int, default=1, help="Hány találati oldalt kérjünk le")
 
     p.add_argument("--district", type=int, default=None, help="Deal-finder szűrés: kerület (pl. 13)")
-    p.add_argument("--min-area", type=float, default=None, help="Deal-finder szűrés: minimum alapterület (m²)")
-    p.add_argument("--max-area", type=float, default=None, help="Deal-finder szűrés: maximum alapterület (m²)")
+    p.add_argument(
+        "--min-area",
+        type=float,
+        default=None,
+        help="Szegmens szűrés: minimum alapterület (m²)",
+    )
+    p.add_argument(
+        "--max-area",
+        type=float,
+        default=None,
+        help="Szegmens szűrés: maximum alapterület (m²)",
+    )
     p.add_argument(
         "--deal-threshold",
         type=float,
@@ -109,42 +119,66 @@ def main() -> int:
 
     save_snapshot(df, data_dir=str(run_data_dir))
 
+    segment_df = df
+    if args.min_area is not None or args.max_area is not None:
+        area = pd.to_numeric(df.get("area_m2"), errors="coerce")
+        segment_mask = area.notna()
+        if args.min_area is not None:
+            segment_mask &= area >= float(args.min_area)
+        if args.max_area is not None:
+            segment_mask &= area <= float(args.max_area)
+        segment_df = df.loc[segment_mask].copy()
+
     district_chart = plot_district_ranking(
-        df,
+        segment_df,
         out_path=str(images_dir / "district_ranking.png"),
     )
 
     snapshots = load_snapshots(data_dir=str(run_data_dir), days=7)
-    trend_df = compute_weekly_trend(snapshots)
+    trend_df = compute_weekly_trend(snapshots, min_area=args.min_area, max_area=args.max_area)
     weekly_chart = plot_weekly_trend(
         trend_df,
         out_path=str(images_dir / "weekly_trend.png"),
     )
 
     deals_df, segment_avg = find_deals(
-        df,
+        segment_df,
         district=args.district,
-        min_area=args.min_area,
-        max_area=args.max_area,
+        min_area=None,
+        max_area=None,
         threshold_pct=args.deal_threshold,
     )
 
-    summary = basic_summary(df)
+    summary = basic_summary(segment_df)
+    summary["listing_count_total"] = int(len(df))
+    summary["segment_min_area_m2"] = float(args.min_area) if args.min_area is not None else None
+    summary["segment_max_area_m2"] = float(args.max_area) if args.max_area is not None else None
     summary["segment_avg_price_per_sqm_huf"] = segment_avg
 
-    district_metric = df[["district", "price_per_sqm_huf"]].copy()
+    district_metric = segment_df[["district", "price_per_sqm_huf"]].copy()
     district_metric["district"] = pd.to_numeric(district_metric["district"], errors="coerce")
     district_metric["price_per_sqm_huf"] = pd.to_numeric(district_metric["price_per_sqm_huf"], errors="coerce")
     district_metric = district_metric.dropna(subset=["district", "price_per_sqm_huf"])
 
     if not district_metric.empty:
-        by_district = district_metric.groupby("district")["price_per_sqm_huf"].mean()
-        cheapest_d = float(by_district.idxmin())
-        expensive_d = float(by_district.idxmax())
+        district_stats = (
+            district_metric.groupby("district")["price_per_sqm_huf"].agg(["mean", "count"]).sort_values("mean")
+        )
+
+        cheapest_d = float(district_stats.index[0])
+        expensive_d = float(district_stats.index[-1])
         summary["cheapest_district"] = int(cheapest_d)
-        summary["cheapest_district_avg_pps"] = float(by_district.loc[cheapest_d])
+        summary["cheapest_district_avg_pps"] = float(district_stats.loc[cheapest_d, "mean"])
         summary["most_expensive_district"] = int(expensive_d)
-        summary["most_expensive_district_avg_pps"] = float(by_district.loc[expensive_d])
+        summary["most_expensive_district_avg_pps"] = float(district_stats.loc[expensive_d, "mean"])
+
+        cheapest = district_stats.head(3).reset_index().to_dict(orient="records")
+        expensive = district_stats.tail(3).sort_values("mean", ascending=False).reset_index().to_dict(orient="records")
+        summary["district_top_cheapest"] = cheapest
+        summary["district_top_expensive"] = expensive
+    else:
+        summary["district_top_cheapest"] = []
+        summary["district_top_expensive"] = []
 
     pdf_path = args.pdf_path or f"report_{dt.datetime.now():%Y-%m-%d_%H%M%S}.pdf"
     generate_pdf_report(
@@ -183,7 +217,7 @@ def main() -> int:
             args.max_area if args.max_area is not None else "*",
             segment_avg,
         )
-        logger.info("Deal találatok: %s", len(deals_df))
+    logger.info("Deal találatok: %s", len(deals_df))
 
     return 0
 

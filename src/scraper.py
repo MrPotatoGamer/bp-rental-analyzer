@@ -6,6 +6,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
+import urllib.request
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import cloudscraper
@@ -70,6 +71,8 @@ class IngatlanScraper:
                 logger.info("GET %s (attempt %s/%s)", url, attempt, self._max_retries)
                 response = self._client.get(url, headers=self._headers, timeout=self._timeout_s)
                 if response.status_code != 200:
+                    if response.status_code == 403:
+                        return self._fetch_html_fancy(url)
                     raise RuntimeError(f"HTTP {response.status_code} for {url}")
                 return response.text
             except Exception as exc:
@@ -79,6 +82,14 @@ class IngatlanScraper:
                     time.sleep(1.5 * attempt)
 
         raise RuntimeError(f"Failed to fetch {url}") from last_error
+
+    # ha a cloud scraper nem jut at:
+    def _fetch_html_fancy(self, url: str) -> str:
+        opener = urllib.request.build_opener()
+        opener.addheaders = [("User-Agent", DEFAULT_USER_AGENT)]
+        with opener.open(url, timeout=self._timeout_s) as response:
+            web_bytes = response.read()
+        return web_bytes.decode("utf-8", errors="replace")
 
     def fetch_soup(self, url: str) -> BeautifulSoup:
         html = self.fetch_html(url)
@@ -95,11 +106,18 @@ class IngatlanScraper:
         all_listings: dict[str, RawListing] = {}
         current_url = url
 
+        completed_pages = 0
+
         for page_index in range(1, max(1, pages) + 1):
             page_url = current_url if page_index == 1 else _with_query_param(url, "page", str(page_index))
-            soup = self.fetch_soup(page_url)
-            listings = parse_listings(soup, source_url=page_url)
-            logger.info("Parsed %s listings from page %s", len(listings), page_index)
+            try:
+                soup = self.fetch_soup(page_url)
+                listings = parse_listings(soup, source_url=page_url)
+                logger.info("Parsed %s listings from page %s", len(listings), page_index)
+                completed_pages = page_index
+            except Exception as exc:
+                logger.warning("Stopping early at page %s due to fetch/parse error: %s", page_index, exc)
+                break
 
             for listing in listings:
                 all_listings.setdefault(listing.listing_id, listing)
@@ -111,6 +129,9 @@ class IngatlanScraper:
 
             if delay_s and page_index < pages:
                 time.sleep(delay_s)
+
+        if completed_pages and completed_pages < pages:
+            logger.info("Fetched %s/%s pages (%s listings)", completed_pages, pages, len(all_listings))
 
         return list(all_listings.values())
 

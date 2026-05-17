@@ -176,9 +176,27 @@ def generate_pdf_report(
     pdf.set_report_font("", 11)
     summary_lines: list[str] = []
     summary_lines.append(f"Generálva: {generated_at:%Y-%m-%d %H:%M}")
+
+    
+    seg_min = summary.get("segment_min_area_m2")
+    seg_max = summary.get("segment_max_area_m2")
+    if seg_min is not None and seg_max is not None:
+        summary_lines.append(
+            f"Szegmens: {_fmt_int_hu(seg_min)}-{_fmt_int_hu(seg_max)} m²"
+            if pdf._unicode_enabled
+            else f"Szegmens: {_fmt_int_hu(seg_min)}-{_fmt_int_hu(seg_max)} m2"
+        )
+
     summary_lines.append("Keresés:")
     summary_lines.extend(f"  {part}" for part in _wrap_long_text(search_url, max_len=90))
-    summary_lines.append(f"Hirdetések száma: {_fmt_int_hu(summary.get('listing_count'))}")
+    total_count = summary.get("listing_count_total")
+    seg_count = summary.get("listing_count")
+    if total_count is not None and seg_count is not None:
+        summary_lines.append(
+            f"Hirdetések száma: {_fmt_int_hu(seg_count)}"
+        )
+    else:
+        summary_lines.append(f"Hirdetések száma: {_fmt_int_hu(summary.get('listing_count'))}")
     summary_lines.append(f"Átlag bérleti díj: {_fmt_int_hu(summary.get('avg_price_huf'))} Ft/hó")
     summary_lines.append(
         (
@@ -204,6 +222,40 @@ def generate_pdf_report(
                 else f"Legdragabb kerulet (atlag): {summary.get('most_expensive_district')}. (~{_fmt_int_hu(summary.get('most_expensive_district_avg_pps'))} Ft/ho/m2)"
             )
         )
+
+    def _district_line(item: object) -> str | None:
+        if not isinstance(item, dict):
+            return None
+        d = item.get("district")
+        mean = item.get("mean")
+        count = item.get("count")
+        if d is None or mean is None or count is None:
+            return None
+        try:
+            d_int = int(round(float(d)))
+        except Exception:
+            return None
+        return (
+            f"{d_int}. kerület: ~{_fmt_int_hu(mean)} Ft/hó/m² (n={_fmt_int_hu(count)})"
+            if pdf._unicode_enabled
+            else f"{d_int}. kerulet: ~{_fmt_int_hu(mean)} Ft/ho/m2 (n={_fmt_int_hu(count)})"
+        )
+
+    cheapest = summary.get("district_top_cheapest")
+    if isinstance(cheapest, list) and cheapest:
+        summary_lines.append("Legolcsóbb kerületek (átlag):")
+        for item in cheapest:
+            line = _district_line(item)
+            if line:
+                summary_lines.append(f"  {line}")
+
+    expensive = summary.get("district_top_expensive")
+    if isinstance(expensive, list) and expensive:
+        summary_lines.append("Legdrágább kerületek (átlag):")
+        for item in expensive:
+            line = _district_line(item)
+            if line:
+                summary_lines.append(f"  {line}")
 
     pdf.multi_cell(
         0,
@@ -233,7 +285,14 @@ def generate_pdf_report(
     pdf.ln(4)
     pdf.set_report_font("B", 13)
     pct_label = "15%+" if threshold_pct is None else f"{int(round(float(threshold_pct) * 100))}%+"
-    pdf.cell(0, 8, pdf.txt(f"Top {top_n} legjobb ajánlat ({pct_label} az átlag alatt)"), ln=1)
+    deal_count = 0 if deals_df is None else int(len(deals_df))
+    shown_n = min(int(top_n), deal_count) if deal_count else 0
+    header_text = (
+        f"Top {shown_n} legjobb ajánlat ({pct_label} az átlag alatt)"
+        if shown_n
+        else f"Top {int(top_n)} legjobb ajánlat ({pct_label} az átlag alatt)"
+    )
+    pdf.cell(0, 8, pdf.txt(header_text), ln=1)
 
     if deals_df is None or deals_df.empty:
         pdf.set_report_font("", 11)
